@@ -19,7 +19,7 @@ import (
 
 // runTier2 starts llama-server with the given flags and benchmarks it at
 // each workload depth over the OpenAI-compatible API.
-func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, wl Workload, modelPath, serverBin, runDir string) ([]DepthResult, error) {
+func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, wl Workload, modelPath, llamaBin, runDir string) ([]DepthResult, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("broken inherit chain")
 	}
@@ -29,7 +29,7 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 		return nil, err
 	}
 
-	var args []string
+	var args []string = []string{"serve"}
 	args = append(args, "--host", "127.0.0.1", "--port", fmt.Sprintf("%d", port))
 	// keep the prompt cache small and deterministic for benchmarking
 	if _, ok := resolved["cache-ram"]; !ok {
@@ -49,7 +49,7 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 	}
 	defer logF.Close()
 
-	cmd := exec.Command(serverBin, args...)
+	cmd := exec.Command(llamaBin, args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = logF

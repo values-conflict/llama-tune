@@ -23,11 +23,12 @@ usage:
 run flags:
   -config      config file (required)
   -dir         output directory for results (default: run-<timestamp>)
-  -bench-bin   path to llama-bench (default: llama-bench)
-  -server-bin  path to llama-server (default: llama-server)
-  -llama-bin   path to llama (for 'llama download', default: llama)
+  -llama-bin   path to the unified llama binary (default: llama)
   -only        comma-separated candidate names to run (default: all)
   -phases      comma-separated list of t1,t2 (default: both)
+
+llama-tune drives the unified 'llama' binary: 'llama bench' for tier 1,
+'llama serve' for tier 2, 'llama download' to get models on disk.
 `, toolVersion)
 }
 
@@ -151,9 +152,7 @@ func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "", "config file (required)")
 	dir := fs.String("dir", "", "output directory (default: run-<timestamp>)")
-	benchBin := fs.String("bench-bin", "llama-bench", "path to llama-bench")
-	serverBin := fs.String("server-bin", "llama-server", "path to llama-server")
-	llamaBin := fs.String("llama-bin", "llama", "path to llama (for model downloads)")
+	llamaBin := fs.String("llama-bin", "llama", "path to the unified llama binary")
 	only := fs.String("only", "", "comma-separated candidate names (default: all)")
 	phases := fs.String("phases", "t1,t2", "phases to run: t1 (llama-bench), t2 (live server)")
 	if err := fs.Parse(args); err != nil {
@@ -198,8 +197,7 @@ func cmdRun(args []string) error {
 		ModelPath:  modelPath,
 		ConfigFile: *configPath,
 		ConfigText: cfg.ConfigText,
-		BenchBin:   *benchBin,
-		ServerBin:  *serverBin,
+		LlamaBin:   *llamaBin,
 		ModelInfo:  modelInfo,
 	}
 
@@ -236,7 +234,7 @@ func cmdRun(args []string) error {
 				cr.T1Skip = "spec decoding not supported by llama-bench"
 			} else {
 				fmt.Printf("  tier1: running llama-bench\n")
-				t1, meta, err := runTier1(cfg, cand, *benchBin, *dir)
+				t1, meta, err := runTier1(cfg, cand, *llamaBin, *dir)
 				if meta != nil && benchMeta.BuildCommit == "" {
 					*benchMeta = *meta
 				}
@@ -255,7 +253,7 @@ func cmdRun(args []string) error {
 			if len(cand.DepthOverride) > 0 {
 				wl.Depths = cand.DepthOverride
 			}
-			cr.T2, err = runTier2(ctx, cand, flags, wl, modelPath, *serverBin, *dir)
+			cr.T2, err = runTier2(ctx, cand, flags, wl, modelPath, *llamaBin, *dir)
 			if err != nil {
 				cr.Errors = append(cr.Errors, "tier2: "+err.Error())
 			}

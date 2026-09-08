@@ -46,8 +46,7 @@ type RunManifest struct {
 	Backends   string            `json:"backends,omitempty"`
 	ConfigFile string            `json:"config_file"`
 	ConfigText string            `json:"config_text"`
-	BenchBin   string            `json:"bench_bin"`
-	ServerBin  string            `json:"server_bin"`
+	LlamaBin   string            `json:"llama_bin"`
 	ModelInfo  *ggufModel        `json:"model_info,omitempty"`
 	Candidates []CandidateResult `json:"candidates"`
 }

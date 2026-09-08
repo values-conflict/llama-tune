@@ -102,8 +102,8 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 	return args, unmapped
 }
 
-// runTier1 executes llama-bench for one candidate and returns per-depth results.
-func runTier1(cfg *Config, cand *Candidate, benchBin string, runDir string) ([]DepthResult, *benchMeta, error) {
+// runTier1 executes 'llama bench' for one candidate and returns per-depth results.
+func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string) ([]DepthResult, *benchMeta, error) {
 	resolved := cfg.resolved(cand, 0)
 	if resolved == nil {
 		return nil, nil, fmt.Errorf("candidate %s: broken inherit chain", cand.Name)
@@ -112,7 +112,8 @@ func runTier1(cfg *Config, cand *Candidate, benchBin string, runDir string) ([]D
 		return nil, nil, fmt.Errorf("skip: spec-type %s, llama-bench does not support speculative decoding (tier2 only)", resolved["spec-type"])
 	}
 
-	args, unmapped := benchArgs(resolved, cfg.T1)
+	flagArgs, unmapped := benchArgs(resolved, cfg.T1)
+	args := append([]string{"bench"}, flagArgs...)
 	if len(unmapped) > 0 {
 		fmt.Printf("  tier1: note: flags not mappable to llama-bench (ignored): %s\n", strings.Join(unmapped, ", "))
 	}
@@ -129,17 +130,17 @@ func runTier1(cfg *Config, cand *Candidate, benchBin string, runDir string) ([]D
 	}
 	defer logF.Close()
 
-	cmd := exec.Command(benchBin, args...)
+	cmd := exec.Command(llamaBin, args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = logF
 	logF2, _ := os.Create(logPath + ".cmd")
 	if logF2 != nil {
-		fmt.Fprintf(logF2, "$ %s %s\n", benchBin, strings.Join(args, " "))
+		fmt.Fprintf(logF2, "$ %s %s\n", llamaBin, strings.Join(args, " "))
 		logF2.Close()
 	}
 	if err := cmd.Run(); err != nil {
-		return nil, nil, fmt.Errorf("llama-bench failed (%v), see %s", err, logPath)
+		return nil, nil, fmt.Errorf("llama bench failed (%v), see %s", err, logPath)
 	}
 
 	var rows []map[string]any

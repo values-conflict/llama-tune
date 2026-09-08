@@ -30,11 +30,12 @@ run flags:
 
     -config FILE        sweep config (required)
     -dir DIR            output directory (default: run-<timestamp>)
-    -bench-bin PATH     llama-bench binary (default: llama-bench)
-    -server-bin PATH    llama-server binary (default: llama-server)
-    -llama-bin PATH     llama binary, used for `llama download`
+    -llama-bin PATH     the unified llama binary (default: llama)
     -only a,b,c         only run these candidates
     -phases t1,t2       t1 = llama-bench matrix, t2 = live server (default: both)
+
+Everything goes through the unified `llama` binary: `llama bench` for
+tier 1, `llama serve` for tier 2, `llama download` to get models on disk.
 
 ## How a sweep works
 
@@ -112,16 +113,13 @@ The binary is static Go, no dependencies:
 
     CGO_ENABLED=0 go build -o llama-tune .
 
-Copy `llama-tune` and your sweep file into the image alongside the
-llama.cpp install (which already provides `llama`, `llama-server`, and
-`llama-bench`):
+Your image already ships the unified `llama` binary (which contains
+`serve`, `bench`, and `download` as subcommands), so the only thing to
+add is `llama-tune` itself:
 
-    /install/bin/llama-tune run \
-        -config /sweeps/qwen.ini \
-        -dir /results/run-v3 \
-        -bench-bin /install/bin/llama-bench \
-        -server-bin /install/bin/llama-server \
-        -llama-bin /install/bin/llama
+    /install/bin/llama-tune run -config /sweeps/qwen.ini -dir /results/run-v3
+    # default -llama-bin is "llama"; pass -llama-bin /install/bin/llama
+    # if it is not on PATH
 
 Then rebuild the image with the different compile flags (e.g.
 `-march=x86-64-v4`) and run the same sweep into a second directory:
