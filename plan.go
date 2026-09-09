@@ -78,14 +78,14 @@ func runFitParams(llamaBin, modelRef string, modelLocal bool, kv string, ctx, ma
 // Anchor: fit-params' projection at (kv, trainedCtx, 1 slot) minus the KV
 // part gives weights+compute, which is constant for the model.
 type memModel struct {
-	probes  map[string]fitProbe // per kv type
-	res     *Resources
-	margin  int64
-	osResv  int64
-	envMiB  int64 // planning envelope
-	kvMiB   map[string]float64 // MiB per token per kv type
-	wPlusC  map[string]int64   // weights + compute, per kv type
-	anchor  int                // ctx the projections were measured at
+	probes map[string]fitProbe // per kv type
+	res    *Resources
+	margin int64
+	osResv int64
+	envMiB int64              // planning envelope
+	kvMiB  map[string]float64 // MiB per token per kv type
+	wPlusC map[string]int64   // weights + compute, per kv type
+	anchor int                // ctx the projections were measured at
 }
 
 func newMemModel(res *Resources, m *ggufModel, probes []fitProbe, marginMiB, osReserveMiB int64, anchorCtx int) *memModel {

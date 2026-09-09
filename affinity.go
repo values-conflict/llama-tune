@@ -10,7 +10,6 @@ import (
 // withAffinity runs fn with the calling goroutine pinned to cpus.
 // Child processes spawned inside fn inherit the affinity at execve,
 // so bench and server runs are restricted without any taskset wrapper.
-//
 var (
 	sysSchedSetaffinity uintptr
 	sysSchedGetaffinity uintptr
@@ -27,6 +26,7 @@ func init() {
 		// leave both 0: withAffinity will fail clearly if ever used
 	}
 }
+
 // Uses raw Linux syscalls to stay dependency-free (x/sys/unix would work
 // too, but this keeps the module at zero external deps).
 func withAffinity(cpus []int, fn func() error) error {

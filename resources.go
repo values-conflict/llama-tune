@@ -13,16 +13,16 @@ func runtimeNumCPU() int { return runtime.NumCPU() }
 
 // Resources is a cgroup/cpuset-aware view of what this container may use.
 type Resources struct {
-	MemTotalMiB int64   // MemTotal from /proc/meminfo (host view)
-	MemLimitMiB int64   // cgroup memory limit, 0 = unlimited
-	MemAvailMiB int64   // the envelope we actually plan against
-	CGroup      string  // "v2", "v1", or "none"
-	LogicalCPUs int     // cpus allowed by cpuset/affinity
-	PhysicalCPUs int
-	QuotaCPUs   float64 // from cpu.max / cfs quota, 0 = unlimited
-	EffectiveCPUs int   // min(logical, floor(quota))
-	FastCPUs      []int // performance-core cluster (P-cores); empty = homogeneous
-	FastPhysical  int   // physical cores inside FastCPUs (0 if none)
+	MemTotalMiB   int64  // MemTotal from /proc/meminfo (host view)
+	MemLimitMiB   int64  // cgroup memory limit, 0 = unlimited
+	MemAvailMiB   int64  // the envelope we actually plan against
+	CGroup        string // "v2", "v1", or "none"
+	LogicalCPUs   int    // cpus allowed by cpuset/affinity
+	PhysicalCPUs  int
+	QuotaCPUs     float64 // from cpu.max / cfs quota, 0 = unlimited
+	EffectiveCPUs int     // min(logical, floor(quota))
+	FastCPUs      []int   // performance-core cluster (P-cores); empty = homogeneous
+	FastPhysical  int     // physical cores inside FastCPUs (0 if none)
 }
 
 func (r *Resources) String() string {
