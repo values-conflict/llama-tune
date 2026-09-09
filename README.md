@@ -124,7 +124,7 @@ the config work unchanged for gemma and friends.
 ## A typical night
 
     # on the box, first time with a model:
-    llama scan  unsloth/Some-27B-GGUF:Q4_K_XL     # what is this model?
+    llama-tune scan unsloth/Some-27B-GGUF:Q4_K_XL     # what is this model?
     llama-tune plan -hf unsloth/Some-27B-GGUF:Q4_K_XL > sweep.ini  # draft config
     $EDITOR sweep.ini                              # tweak, add escape-hatch candidates
     llama-tune run -config sweep.ini -dir run-v3
