@@ -130,15 +130,46 @@ the config work unchanged for gemma and friends.
     llama-tune run -config sweep.ini -dir run-v3
     llama-tune emit -run run-v3                    # paste the winner into models.ini
 
-`plan` is deliberately conservative: it probes q4_0/q8_0/f16 kv through
-`llama fit-params` at your target ctx (one call per type - the fit math
-is per-kv-type, a bare `llama fit-params` assumes f16 kv), keeps the
-smallest kv type that fits as the default, and only schedules larger
-kv types when they fit too. The thread candidates come from the actual
-CPU topology, spec candidates from MTP detection, and MoE candidates
-only appear when the model has experts.
+`plan` computes the feasible configuration space, in three tiers:
 
-## Putting it in the Docker image
+1. **computed defaults** - ctx, kv type, threads, and the prompt cache
+   (`cache-ram`). All memory math is cgroup/cpuset-aware: it reads the
+   container's memory limit, cpuset, and cpu.max quota (v2 and v1), not
+   the host totals. ggml's own memory views are not cgroup-aware, so
+   `plan` takes the *size* from `llama fit-params` (one probe per kv
+   type at your target ctx, at -lv 4 to read the "projected to use" line)
+   and the *envelope* from the cgroup limits; since size is linear in
+   ctx x slots, the whole (ctx, parallel) space falls out of arithmetic
+   from those anchors.
+2. **active candidates** - a one-knob-at-a-time matrix over the feasible
+   values: kv types that fit, flash-attn on/off, thread counts from the
+   container's actual CPU view, spec variants from MTP detection, and a
+   tier1-only ubatch ladder (batch/ubatch are prompt-processing knobs,
+   measured directly by llama-bench's pp test).
+3. **commented trade-off sections** - the speed-neutral decisions, with
+   exact numbers: each `(ctx, parallel)` tuple that fits at or above
+   `-min-ctx` (default 32k) becomes a commented section with the ctx,
+   parallel, and the prompt cache headroom it leaves. Uncomment to run.
+   These scale to bigger hardware and smaller models automatically
+   because they are pure arithmetic from the anchors.
+
+Performance cores: `plan` detects a P/E cluster from the topology
+(`/sys/devices/cpu_core/cpus` - Intel hybrid x86 like the 14900K)
+and falls back to cpufreq max-frequency tiers (ARM big.LITTLE, within
+10% of the top). When one exists it emits a `[fast-cpus]` candidate
+pinning to the P-cores with one thread per physical P-core (SMT off),
+but only when the fit probe shows CPU inference is actually happening
+(ngl not all) - pinning is pointless when the gpu does the work. The
+plain threads-* candidates cover the HT axis separately (full-width,
+physical vs logical). You can also pin any candidate by hand:
+
+    [pinned]
+    inherit = baseline-nospec
+    pin-cpus = 0-3
+
+The harness sets process affinity around the spawn (raw
+`sched_setaffinity`, dependency-free), which children inherit at
+execve - no `taskset` needed, and the flag never reaches llama.cpp.
 
 The binary is static Go, no dependencies:
 

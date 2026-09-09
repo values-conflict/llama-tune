@@ -252,6 +252,38 @@ func parseConfigString(raw string) (*Config, error) {
 	return cfg, nil
 }
 
+// pinCPUs reads the resolved "pin-cpus" value ("0-3,8" list; empty = all).
+func pinCPUs(resolved map[string]string) []int {
+	v, ok := resolved["pin-cpus"]
+	if !ok || v == "" {
+		return nil
+	}
+	var out []int
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if lo, hi, ok := strings.Cut(part, "-"); ok {
+			a, e1 := strconv.Atoi(strings.TrimSpace(lo))
+			b, e2 := strconv.Atoi(strings.TrimSpace(hi))
+			if e1 != nil || e2 != nil || b < a {
+				return nil
+			}
+			for i := a; i <= b; i++ {
+				out = append(out, i)
+			}
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return nil
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 // indexInlineComment returns the index of an inline # or ; comment
 // (must be preceded by whitespace so values containing the chars survive).
 func indexInlineComment(line string) int {
@@ -278,6 +310,8 @@ func serverArgs(flags map[string]string) []string {
 		switch k {
 		case "hf", "model":
 			continue // model is passed by the caller
+		case "pin-cpus":
+			continue // consumed by the harness (process affinity)
 		default:
 			if boolFlags[k] {
 				b, err := parseBool(v)

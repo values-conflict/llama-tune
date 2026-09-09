@@ -45,6 +45,8 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 		switch k {
 		case "hf", "model":
 			// handled by caller
+		case "pin-cpus":
+			// consumed by the harness (process affinity)
 		case "n-gpu-layers":
 			add("-ngl", ngl(v))
 		case "threads":
@@ -73,15 +75,8 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 				add("-fa", v)
 			}
 		case "kv-unified":
-			if b, err := parseBool(v); err == nil {
-				if b {
-					args = append(args, "-kvu")
-				} else {
-					args = append(args, "-no-kvu")
-				}
-			} else {
-				unmapped = append(unmapped, k)
-			}
+			// server-only flag; llama-bench does not accept -kvu
+			unmapped = append(unmapped, k)
 		default:
 			unmapped = append(unmapped, k)
 		}
@@ -139,7 +134,7 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string) ([]D
 		fmt.Fprintf(logF2, "$ %s %s\n", llamaBin, strings.Join(args, " "))
 		logF2.Close()
 	}
-	if err := cmd.Run(); err != nil {
+	if err := withAffinity(pinCPUs(resolved), cmd.Run); err != nil {
 		return nil, nil, fmt.Errorf("llama bench failed (%v), see %s", err, logPath)
 	}
 

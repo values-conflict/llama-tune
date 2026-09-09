@@ -53,7 +53,9 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = logF
-	if err := cmd.Start(); err != nil {
+	// the server inherits our affinity at execve; the harness can release it
+	aff := pinCPUs(resolved)
+	if err := withAffinity(aff, cmd.Start); err != nil {
 		return nil, err
 	}
 	defer stopServer(cmd)
