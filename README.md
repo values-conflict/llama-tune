@@ -21,6 +21,20 @@ model, any build, any set of flags.
         Run the sweep. Writes run-1/run.json, results.tsv, results.md and
         one log per candidate/phase.
 
+    llama-tune plan [flags]
+        Generate a sweep config from the model and the local hardware.
+        Scans the gguf (MTP, MoE, trained ctx), probes each kv cache
+        type with `llama fit-params` (so per-type memory fit is
+        authoritative), reads the CPU topology, and emits an .ini on
+        stdout ready for `run`. Progress goes to stderr, so
+        `llama-tune plan ... > sweep.ini` works.
+
+    llama-tune emit [flags]
+        Print the winning candidate of a run as a models.ini section
+        (the router's config format) ready to paste: flags resolved
+        through the inherit chain, ranked by tg (or pp) at the deepest
+        measured depth at or below -depth.
+
     llama-tune compare <runA> <runB>
         Align two runs cell by cell (same candidate + depth) and print
         the deltas. This is the v3-vs-v4 story: run the same sweep with
@@ -106,6 +120,23 @@ flag, so new server flags work without changing the tool.
 tensor) and picks `draft-mtp` when present, otherwise `ngram-mod` with the
 same values as llama.cpp's built-in `--spec-default`. This is what makes
 the config work unchanged for gemma and friends.
+
+## A typical night
+
+    # on the box, first time with a model:
+    llama scan  unsloth/Some-27B-GGUF:Q4_K_XL     # what is this model?
+    llama-tune plan -hf unsloth/Some-27B-GGUF:Q4_K_XL > sweep.ini  # draft config
+    $EDITOR sweep.ini                              # tweak, add escape-hatch candidates
+    llama-tune run -config sweep.ini -dir run-v3
+    llama-tune emit -run run-v3                    # paste the winner into models.ini
+
+`plan` is deliberately conservative: it probes q4_0/q8_0/f16 kv through
+`llama fit-params` at your target ctx (one call per type - the fit math
+is per-kv-type, a bare `llama fit-params` assumes f16 kv), keeps the
+smallest kv type that fits as the default, and only schedules larger
+kv types when they fit too. The thread candidates come from the actual
+CPU topology, spec candidates from MTP detection, and MoE candidates
+only appear when the model has experts.
 
 ## Putting it in the Docker image
 

@@ -126,6 +126,10 @@ func parseConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseConfigString(string(raw))
+}
+
+func parseConfigString(raw string) (*Config, error) {
 	cfg := &Config{
 		Defaults:    map[string]string{},
 		DefaultKeys: []string{},
@@ -136,6 +140,7 @@ func parseConfig(path string) (*Config, error) {
 
 	var cur *Candidate
 	var candPtrs []*Candidate
+	var err error
 	section := "" // "", "workload", "tier1", or a candidate name
 	for lineno, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))

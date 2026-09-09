@@ -17,7 +17,9 @@ func usage() {
 
 usage:
   llama-tune scan <model> [model...]      scan gguf files (or hf refs) for model intel
+  llama-tune plan [flags]                 generate a sweep config from model + hardware
   llama-tune run [flags]                   run the sweep from a config file
+  llama-tune emit [flags]                 print the run's winner as a models.ini section
   llama-tune compare <runA> <runB>         compare two run directories
 
 run flags:
@@ -41,8 +43,12 @@ func main() {
 	switch os.Args[1] {
 	case "scan":
 		err = cmdScan(os.Args[2:])
+	case "plan":
+		err = cmdPlan(os.Args[2:])
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "emit":
+		err = cmdEmit(os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "help", "-h", "--help":
