@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,12 @@ import (
 	"syscall"
 	"time"
 )
+
+// errLoadFailed marks a server that never became healthy (a model/context
+// load failure). That outcome is deterministic for a given config and box -
+// re-running on resume just burns minutes reaching the same wall - so the
+// harness records it and skips the candidate unless -force is given.
+var errLoadFailed = errors.New("server failed to load")
 
 // runTier2 starts llama-server with the given flags and benchmarks it at
 // each workload depth over the OpenAI-compatible API.
@@ -58,25 +65,29 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 	if err := withAffinity(aff, cmd.Start); err != nil {
 		return nil, err
 	}
-	defer stopServer(cmd)
+	// single Wait: exitCh reports process death so a load failure fails fast
+	// instead of waiting out the whole health timeout
+	exitCh := make(chan error, 1)
+	go func() { exitCh <- cmd.Wait() }()
+	defer stopServer(cmd, exitCh)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 	healthCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
-	if err := waitHealthy(healthCtx, url+"/health"); err != nil {
+	if err := waitHealthy(healthCtx, url+"/health", exitCh); err != nil {
 		// include the tail of the log for quick diagnosis
 		tail := tailOf(logPath, 12)
-		return nil, fmt.Errorf("server did not become healthy: %v\nlog tail:\n%s", err, tail)
+		return nil, fmt.Errorf("%w: %v\nlog tail:\n%s", errLoadFailed, err, tail)
 	}
 
 	defer func() {
 		// capture a final log chunk that only appears on shutdown (memory breakdown)
-		stopServer(cmd)
+		stopServer(cmd, exitCh)
 	}()
 
 	// warmup: trigger shader compilation / lazy init on a throwaway request
 	if wl.Warmup {
-		if _, err := completion(ctx, url, "hello, this is a warmup request.", 8); err != nil {
+		if _, err := completion(ctx, url, "hello, this is a warmup request.", 8, 30*time.Minute); err != nil {
 			return nil, fmt.Errorf("warmup request failed: %w", err)
 		}
 	}
@@ -85,9 +96,11 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 	for i, depth := range wl.Depths {
 		for r := 0; r < wl.Repeats; r++ {
 			prompt := makePrompt(depth, i, r)
-			d, err := completion(ctx, url, prompt, wl.Gen)
+			d, err := completion(ctx, url, prompt, wl.Gen, requestTimeout(depth))
 			if err != nil {
-				return nil, fmt.Errorf("depth %d repeat %d: %w", depth, r, err)
+				// keep the results measured so far; one bad depth should not
+				// discard the whole candidate
+				return out, fmt.Errorf("depth %d repeat %d: %w", depth, r, err)
 			}
 			d.Depth = depth
 			out = append(out, d)
@@ -100,6 +113,12 @@ func runTier2(ctx context.Context, cand *Candidate, resolved map[string]string, 
 		}
 	}
 	return out, nil
+}
+
+// requestTimeout bounds one depth: a prefill at a pessimistic 10 t/s plus
+// room for the decode and slow hardware. 262144 ctx -> about 7.8 h.
+func requestTimeout(depth int) time.Duration {
+	return 30*time.Minute + time.Duration(float64(depth)/600.0)*time.Minute
 }
 
 type completionResp struct {
@@ -116,14 +135,17 @@ type completionResp struct {
 	} `json:"timings"`
 }
 
-func completion(ctx context.Context, url, prompt string, maxTokens int) (DepthResult, error) {
+func completion(ctx context.Context, url, prompt string, maxTokens int, timeout time.Duration) (DepthResult, error) {
 	body, _ := json.Marshal(map[string]any{
 		"prompt":      prompt,
 		"max_tokens":  maxTokens,
 		"temperature": 0,
 		"stream":      false,
+		// the synthetic prompt can end on a spot where the model emits EOS at
+		// token 1, which would measure a 0.00 tg depth; force the full decode
+		"ignore_eos": true,
 	})
-	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, "POST", url+"/v1/completions", bytes.NewReader(body))
 	if err != nil {
@@ -176,7 +198,7 @@ func makePrompt(depth, which, repeat int) string {
 	return b.String()
 }
 
-func waitHealthy(ctx context.Context, url string) error {
+func waitHealthy(ctx context.Context, url string, exitCh <-chan error) error {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
@@ -192,6 +214,9 @@ func waitHealthy(ctx context.Context, url string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-exitCh:
+			// the process is gone: a load failure, not a slow start - fail now
+			return fmt.Errorf("server process exited before becoming healthy")
 		case <-tick.C:
 		}
 	}
@@ -206,21 +231,18 @@ func freePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-func stopServer(cmd *exec.Cmd) {
+func stopServer(cmd *exec.Cmd, exitCh <-chan error) {
+	// ProcessState is set once the single Wait (fed into exitCh) has returned,
+	// which also guards the second deferred call from blocking on an empty channel
 	if cmd.Process == nil || cmd.ProcessState != nil {
 		return
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
+	case <-exitCh:
 	case <-time.After(60 * time.Second):
 		_ = cmd.Process.Kill()
-		<-done
+		<-exitCh
 	}
 }
 

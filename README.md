@@ -46,6 +46,7 @@ run flags:
     -dir DIR            output directory (default: run-<timestamp>)
     -llama-bin PATH     the unified llama binary (default: llama)
     -only a,b,c         only run these candidates
+    -skip a,b,c         exclude these candidates (inverse of -only)
     -phases t1,t2       t1 = llama-bench matrix, t2 = live server (default: both)
 
 Everything goes through the unified `llama` binary: `llama bench` for
@@ -152,6 +153,28 @@ the config work unchanged for gemma and friends.
    parallel, and the prompt cache headroom it leaves. Uncomment to run.
    These scale to bigger hardware and smaller models automatically
    because they are pure arithmetic from the anchors.
+
+## Resuming and partial results
+
+Results are written after *every* candidate, so an interrupted or killed
+run keeps everything it measured. Re-running the same `-dir` resumes:
+measured `(candidate, phase, depth)` rows are kept and only the missing
+ones are measured (add `-force` to re-measure everything; a dir holding
+a different model is refused). This makes patching a sweep trivial -
+add a depth to the config, re-run, done. A tier-2 candidate whose server never
+becomes healthy (a load failure) is recorded as skipped so resume does not
+re-run it; `-force` retries it. The health wait also fails fast when the
+server process exits, instead of polling for the full timeout. `llama-tune report -dir <run>`
+re-renders results.md/tsv from run.json at any time (e.g. after a crash)
+and prints the summary.
+
+## Config flags worth knowing
+
+`spec-type` accepts comma-separated chains (`draft-mtp,ngram-mod`):
+drafts are tried in order and the first implementation that produces a
+draft wins the step, the rest are skipped. For an MTP model the MTP
+draft essentially always succeeds, so ngram behind it is a fallback that
+rarely fires - it adds coverage, not speed on top.
 
 Performance cores: `plan` detects a P/E cluster from the topology
 (`/sys/devices/cpu_core/cpus` - Intel hybrid x86 like the 14900K)

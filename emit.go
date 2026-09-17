@@ -68,6 +68,7 @@ func cmdEmit(args []string) error {
 		e   entry
 		val float64
 		at  int
+		row *DepthResult
 	}
 	var best *scored
 	for _, e := range entries {
@@ -91,7 +92,7 @@ func cmdEmit(args []string) error {
 			continue
 		}
 		if best == nil || v > best.val {
-			best = &scored{e, v, row.Depth}
+			best = &scored{e, v, row.Depth, row}
 		}
 	}
 	if best == nil {
@@ -120,8 +121,9 @@ func cmdEmit(args []string) error {
 			printKey(k, best.e.flags[k])
 		}
 	}
-	fmt.Fprintf(os.Stderr, "\nwinner: %s (%s %.2f t/s at depth %d, from %s)\n",
-		best.e.cand.Name, *metric, best.val, best.at, *run)
+	// rank by -metric, but show both axes: the pp/tg winner can differ
+	fmt.Fprintf(os.Stderr, "\nwinner by %s: %s (tg %.2f, pp %.1f t/s at depth %d, from %s)\n",
+		*metric, best.e.cand.Name, best.row.TG, best.row.PP, best.at, *run)
 	return nil
 }
 

@@ -312,6 +312,16 @@ func serverArgs(flags map[string]string) []string {
 			continue // model is passed by the caller
 		case "pin-cpus":
 			continue // consumed by the harness (process affinity)
+		case "flash-attn":
+			// serve takes on|off|auto, not true/false - normalize like bench
+			switch strings.ToLower(v) {
+			case "true", "on", "yes", "1":
+				out = append(out, "--flash-attn", "on")
+			case "false", "off", "no", "0":
+				out = append(out, "--flash-attn", "off")
+			default:
+				out = append(out, "--flash-attn", v)
+			}
 		default:
 			if boolFlags[k] {
 				b, err := parseBool(v)

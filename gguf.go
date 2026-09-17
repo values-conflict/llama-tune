@@ -27,6 +27,7 @@ type ggufModel struct {
 	NTensors   int64
 	HasNextN   bool // contains any .nextn. tensor
 	MTP        bool // has blk.<block_count-1>.nextn.eh_proj.weight, i.e. draft-mtp capable
+	NextNLayer int64 // nextn_predict_layers: how many blocks carry the MTP module
 }
 
 // scanGGUF reads only the GGUF metadata section (kv pairs + tensor info),
@@ -205,6 +206,11 @@ func scanGGUF(path string) (*ggufModel, error) {
 			if v, ok := val.(int64); ok {
 				m.FileType = ggmlTypeName(v)
 			}
+		default:
+			// arch-prefixed, matched by suffix so key ordering does not matter
+			if strings.HasSuffix(key, ".nextn_predict_layers") {
+				m.NextNLayer = asInt(val)
+			}
 		}
 	}
 
@@ -276,20 +282,33 @@ func (m *ggufModel) kvBytesPerToken(ck, cv string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return float64(m.BlockCount) * float64(nKV) * float64(headDim) * 2 * (bK + bV), nil
+	// (bK + bV) already covers both the K and the V cache
+	return float64(m.BlockCount) * float64(nKV) * float64(headDim) * (bK + bV), nil
 }
 
 // bytes per element including block scale overhead (q4_0: 17 bytes per 32 elements)
+// kvBytesPerElem returns KV-cache bytes per element (K or V) for a cache
+// type, derived from the ggml quant block layout (weights + block scale,
+// divided by elements per block). Must be float - integer division would
+// collapse every quantized type to ~1.
 func kvBytesPerElem(t string) (float64, error) {
 	switch t {
-	case "f16", "bf16":
-		return 2, nil
-	case "q8_0":
-		return 257 / 256, nil
-	case "q4_0":
-		return 17 / 16, nil
 	case "f32":
 		return 4, nil
+	case "f16", "bf16":
+		return 2, nil
+	case "q8_0": // d fp16 (2B) + qs[32] (32B) per 32
+		return 34.0 / 32, nil
+	case "q5_1": // dm fp16 (4B) + qh[4] (4B) + qs[16] (16B) per 32
+		return 24.0 / 32, nil
+	case "q5_0": // d fp16 (2B) + qh[4] (4B) + qs[16] (16B) per 32
+		return 22.0 / 32, nil
+	case "q4_1": // dm fp16 (4B) + qs[16] (16B) per 32
+		return 20.0 / 32, nil
+	case "q4_0": // d fp16 (2B) + qs[16] (16B) per 32
+		return 18.0 / 32, nil
+	case "iq4_nl": // 4.25 bits per weight
+		return 17.0 / 32, nil
 	default:
 		return 0, fmt.Errorf("unsupported cache type %q", t)
 	}

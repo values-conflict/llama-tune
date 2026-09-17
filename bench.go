@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -27,12 +28,25 @@ type benchRow struct {
 	StdTS   float64 `json:"stddev_ts"`
 }
 
+// benchBenign are flags that llama-bench does not accept but that cannot
+// affect its single-sequence, no-server measurement - reporting them as
+// "unmapped" would be noise on every candidate.
+var benchBenign = map[string]bool{
+	"kv-unified": true, // layout only matters with multiple sequences
+	"jinja":      true,
+	"parallel":   true,
+	"cache-ram":  true,
+	"ctx-size":   true, // bench contexts come from -d depths
+	"warmup":     true,
+}
+
 // benchArgs maps a candidate's resolved flags to llama-bench CLI args.
 // Returns the args and the list of flags that could not be mapped.
 func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 	var args []string
 	var unmapped []string
 	add := func(short, val string) { args = append(args, short, val) }
+	specOff := flags["spec-type"] == "" || flags["spec-type"] == "none"
 
 	ngl := func(v string) string {
 		if v == "all" || v == "auto" || v == "-1" {
@@ -76,8 +90,14 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 			}
 		case "kv-unified":
 			// server-only flag; llama-bench does not accept -kvu
-			unmapped = append(unmapped, k)
 		default:
+			if benchBenign[k] {
+				continue
+			}
+			// spec flags are inert when spec-type is none (leftover inheritance)
+			if strings.HasPrefix(k, "spec-") && specOff {
+				continue
+			}
 			unmapped = append(unmapped, k)
 		}
 	}
@@ -97,8 +117,9 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 	return args, unmapped
 }
 
-// runTier1 executes 'llama bench' for one candidate and returns per-depth results.
-func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string) ([]DepthResult, *benchMeta, error) {
+// runTier1 executes 'llama bench' for one candidate and returns per-depth
+// results. depths overrides cfg.T1.Depths (resume: measure only what is missing).
+func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, depths []int) ([]DepthResult, *benchMeta, error) {
 	resolved := cfg.resolved(cand, 0)
 	if resolved == nil {
 		return nil, nil, fmt.Errorf("candidate %s: broken inherit chain", cand.Name)
@@ -107,7 +128,11 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string) ([]D
 		return nil, nil, fmt.Errorf("skip: spec-type %s, llama-bench does not support speculative decoding (tier2 only)", resolved["spec-type"])
 	}
 
-	flagArgs, unmapped := benchArgs(resolved, cfg.T1)
+	t1 := cfg.T1
+	if len(depths) > 0 {
+		t1.Depths = depths
+	}
+	flagArgs, unmapped := benchArgs(resolved, t1)
 	args := append([]string{"bench"}, flagArgs...)
 	if len(unmapped) > 0 {
 		fmt.Printf("  tier1: note: flags not mappable to llama-bench (ignored): %s\n", strings.Join(unmapped, ", "))
@@ -203,6 +228,7 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string) ([]D
 		}
 		out = append(out, r)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Depth < out[j].Depth })
 	if len(out) == 0 {
 		return nil, meta, fmt.Errorf("no usable rows in llama-bench output")
 	}

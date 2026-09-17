@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,6 +88,117 @@ func loadRun(dir string) (*RunManifest, error) {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// replaceCandidate upserts cr into the manifest by name.
+func replaceCandidate(m *RunManifest, cr *CandidateResult) {
+	for i := range m.Candidates {
+		if m.Candidates[i].Name == cr.Name {
+			m.Candidates[i] = *cr
+			return
+		}
+	}
+	m.Candidates = append(m.Candidates, *cr)
+}
+
+// missingDepths returns the wanted depths that have no measured row yet.
+// rowValid reports whether a measured row is a real result. With ignore_eos a
+// successful measurement always yields pp>0 and tg>0; a zero in either is a
+// failed depth (EOS bail, server hiccup) that must be re-measured, not kept.
+func rowValid(d DepthResult) bool {
+	return d.PP > 0 && d.TG > 0
+}
+
+func missingDepths(want []int, have []DepthResult) []int {
+	seen := map[int]bool{}
+	for _, d := range have {
+		if rowValid(d) {
+			seen[d.Depth] = true
+		}
+	}
+	var out []int
+	for _, d := range want {
+		if !seen[d] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// mergePhase appends fresh rows onto old ones; fresh wins per depth.
+func mergePhase(old, fresh []DepthResult) []DepthResult {
+	byDepth := map[int]DepthResult{}
+	var order []int
+	for _, d := range append(append([]DepthResult{}, old...), fresh...) {
+		if _, ok := byDepth[d.Depth]; !ok {
+			order = append(order, d.Depth)
+		}
+		byDepth[d.Depth] = d
+	}
+	sort.Ints(order)
+	out := make([]DepthResult, 0, len(order))
+	for _, d := range order {
+		out = append(out, byDepth[d])
+	}
+	return out
+}
+
+// clearSatisfiedErrors drops a phase's old errors once every wanted depth
+// has a valid row (a re-measured timeout should stop haunting notes).
+func clearSatisfiedErrors(cr *CandidateResult, prefix string, want []int, have []DepthResult) {
+	seen := map[int]bool{}
+	for _, d := range have {
+		if rowValid(d) {
+			seen[d.Depth] = true
+		}
+	}
+	for _, d := range want {
+		if !seen[d] {
+			return
+		}
+	}
+	var out []string
+	for _, e := range cr.Errors {
+		if strings.HasPrefix(e, prefix+":") {
+			continue
+		}
+		out = append(out, e)
+	}
+	cr.Errors = out
+}
+
+func dedupStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// cmdReport re-renders results.md/tsv from a run's run.json (e.g. after an
+// interrupted run) and prints the summary.
+func cmdReport(args []string) error {
+	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	dir := fs.String("dir", "", "run directory (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dir == "" {
+		return fmt.Errorf("-dir is required")
+	}
+	m, err := loadRun(*dir)
+	if err != nil {
+		return err
+	}
+	if err := writeRun(*dir, m); err != nil {
+		return err
+	}
+	fmt.Println(m.markdown())
+	return nil
 }
 
 func f3(v float64) string {
@@ -207,8 +319,16 @@ func (m *RunManifest) markdown() string {
 			if c.T2Skip != "" && ph.name == "tier2 (live server)" {
 				notes = append(notes, fmt.Sprintf("- %s: %s", c.Name, c.T2Skip))
 			}
+			// each error appears only in the section of the phase that made it
 			for _, e := range c.Errors {
-				notes = append(notes, fmt.Sprintf("- %s: %s", c.Name, e))
+				switch {
+				case strings.HasPrefix(e, "tier1:") && ph.name == "tier1 (llama-bench)":
+					notes = append(notes, fmt.Sprintf("- %s: %s", c.Name, e))
+				case strings.HasPrefix(e, "tier2:") && ph.name == "tier2 (live server)":
+					notes = append(notes, fmt.Sprintf("- %s: %s", c.Name, e))
+				case !strings.Contains(e, "tier") && ph.name == "tier2 (live server)":
+					notes = append(notes, fmt.Sprintf("- %s: %s", c.Name, e))
+				}
 			}
 		}
 		if len(notes) > 0 {
