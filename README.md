@@ -48,6 +48,9 @@ run flags:
     -only a,b,c         only run these candidates
     -skip a,b,c         exclude these candidates (inverse of -only)
     -phases t1,t2       t1 = llama-bench matrix, t2 = live server (default: both)
+    -t1-timeout DUR     wall-clock bound per `llama bench` process (default: 8h,
+                        0 = none); a hung GPU driver otherwise blocks the
+                        sweep indefinitely
 
 Everything goes through the unified `llama` binary: `llama bench` for
 tier 1, `llama serve` for tier 2, `llama download` to get models on disk.
@@ -164,7 +167,12 @@ a different model is refused). This makes patching a sweep trivial -
 add a depth to the config, re-run, done. A tier-2 candidate whose server never
 becomes healthy (a load failure) is recorded as skipped so resume does not
 re-run it; `-force` retries it. The health wait also fails fast when the
-server process exits, instead of polling for the full timeout. `llama-tune report -dir <run>`
+server process exits, instead of polling for the full timeout. Each tier-1
+`llama bench` runs with `--progress`, so its log streams a marker per test
+(`benchmark N/M: starting`, `warmup prompt run`, ...): a log that stops
+growing is a hung bench, and `-t1-timeout` kills it so the sweep can
+record the failure and move on (the candidate is re-measured on resume,
+or excluded with `-skip`). `llama-tune report -dir <run>`
 re-renders results.md/tsv from run.json at any time (e.g. after a crash)
 and prints the summary.
 

@@ -31,6 +31,10 @@ run flags:
   -only        comma-separated candidate names to run (default: all)
   -phases      comma-separated list of t1,t2 (default: both)
   -force       re-measure everything, even depths already in -dir
+  -t1-timeout  wall-clock bound for each 'llama bench' process (default: 8h,
+               0 = no bound); a hung GPU driver otherwise blocks the sweep
+               indefinitely. Progress markers are streamed to the tier1 log
+               (-progress), so a log that stops growing is a hang.
 
 re-runs into the same -dir resume: already-measured (candidate, phase,
 depth) rows are kept and only the missing ones are measured. Results are
@@ -170,6 +174,7 @@ func cmdRun(args []string) error {
 	llamaBin := fs.String("llama-bin", "llama", "path to the unified llama binary")
 	only := fs.String("only", "", "comma-separated candidate names (default: all)")
 	skip := fs.String("skip", "", "comma-separated candidate names to exclude (inverse of -only)")
+	t1Timeout := fs.Duration("t1-timeout", 8*time.Hour, "wall-clock bound for each llama bench process (0 = no bound)")
 	phases := fs.String("phases", "t1,t2", "phases to run: t1 (llama-bench), t2 (live server)")
 	force := fs.Bool("force", false, "re-measure everything, even depths already in -dir; also retries candidates skipped after a load failure")
 	if err := fs.Parse(args); err != nil {
@@ -317,7 +322,7 @@ func cmdRun(args []string) error {
 				fmt.Printf("  tier1: %d depth(s) already measured, skipping (resume)\n", len(cfg.T1.Depths))
 			} else {
 				fmt.Printf("  tier1: running llama-bench (%d new depth(s): %s)\n", len(missing), joinInts(missing))
-				t1, meta, err := runTier1(cfg, cand, *llamaBin, *dir, missing)
+				t1, meta, err := runTier1(cfg, cand, *llamaBin, *dir, missing, *t1Timeout)
 				if meta != nil && benchMeta.BuildCommit == "" {
 					*benchMeta = *meta
 				}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // benchMeta is filled from any llama-bench json row (identical for all rows).
@@ -114,12 +116,17 @@ func benchArgs(flags map[string]string, t1 Tier1) ([]string, []string) {
 	}
 	args = append(args, "-r", fmt.Sprintf("%d", t1.Repeats))
 	args = append(args, "-o", "json")
+	// progress markers go to stderr (the tier1 log): a log that stops
+	// growing is a hung bench, even with no timeout configured
+	args = append(args, "--progress")
 	return args, unmapped
 }
 
 // runTier1 executes 'llama bench' for one candidate and returns per-depth
-// results. depths overrides cfg.T1.Depths (resume: measure only what is missing).
-func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, depths []int) ([]DepthResult, *benchMeta, error) {
+// results. depths overrides cfg.T1.Depths (resume: measure only what is
+// missing). timeout bounds the whole bench process (a hung GPU driver
+// otherwise blocks the sweep indefinitely); 0 disables the bound.
+func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, depths []int, timeout time.Duration) ([]DepthResult, *benchMeta, error) {
 	resolved := cfg.resolved(cand, 0)
 	if resolved == nil {
 		return nil, nil, fmt.Errorf("candidate %s: broken inherit chain", cand.Name)
@@ -150,7 +157,15 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, dept
 	}
 	defer logF.Close()
 
-	cmd := exec.Command(llamaBin, args...)
+	var cmd *exec.Cmd
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		cmd = exec.CommandContext(ctx, llamaBin, args...)
+	} else {
+		cmd = exec.Command(llamaBin, args...)
+	}
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = logF
@@ -159,7 +174,14 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, dept
 		fmt.Fprintf(logF2, "$ %s %s\n", llamaBin, strings.Join(args, " "))
 		logF2.Close()
 	}
-	if err := withAffinity(pinCPUs(resolved), cmd.Run); err != nil {
+	err = withAffinity(pinCPUs(resolved), cmd.Run)
+	if cancel != nil {
+		cancel()
+	}
+	if err != nil {
+		if ctx != nil && ctx.Err() == context.DeadlineExceeded {
+			return nil, nil, fmt.Errorf("llama bench timed out after %s (hung?), see %s", timeout, logPath)
+		}
 		return nil, nil, fmt.Errorf("llama bench failed (%v), see %s", err, logPath)
 	}
 
