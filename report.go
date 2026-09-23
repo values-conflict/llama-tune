@@ -18,6 +18,7 @@ type DepthResult struct {
 	TG       float64 `json:"tg_tps"`         // generation t/s
 	DraftN   int     `json:"draft_n"`        // speculative tokens drafted (0 = no spec)
 	DraftAcc int     `json:"draft_accepted"` // speculative tokens accepted
+	At       string  `json:"measured_at"`    // RFC3339; rows resumed from a prior run keep the old stamp
 }
 
 func (d DepthResult) acceptRate() float64 {

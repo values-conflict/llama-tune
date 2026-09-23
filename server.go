@@ -174,6 +174,7 @@ func completion(ctx context.Context, url, prompt string, maxTokens int, timeout 
 		TG:       cr.Timings.PredictedPerSec,
 		DraftN:   cr.Timings.DraftN,
 		DraftAcc: cr.Timings.DraftNAccepted,
+		At:       time.Now().UTC().Format(time.RFC3339),
 	}
 	if d.PromptN == 0 {
 		d.PromptN = cr.Usage.PromptTokens

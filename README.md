@@ -162,7 +162,10 @@ the config work unchanged for gemma and friends.
 Results are written after *every* candidate, so an interrupted or killed
 run keeps everything it measured. Re-running the same `-dir` resumes:
 measured `(candidate, phase, depth)` rows are kept and only the missing
-ones are measured (add `-force` to re-measure everything; a dir holding
+ones are measured (each row carries a `measured_at` timestamp, so rows
+resumed across days keep their original stamp - a slow night poisons
+comparisons for as long as its rows are kept). Add `-force` to re-measure
+everything (a dir holding
 a different model is refused). This makes patching a sweep trivial -
 add a depth to the config, re-run, done. A tier-2 candidate whose server never
 becomes healthy (a load failure) is recorded as skipped so resume does not

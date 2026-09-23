@@ -240,8 +240,9 @@ func runTier1(cfg *Config, cand *Candidate, llamaBin string, runDir string, dept
 	}
 
 	var out []DepthResult
+	now := time.Now().UTC().Format(time.RFC3339)
 	for d, a := range results {
-		r := DepthResult{Depth: d, PromptN: a.promptN}
+		r := DepthResult{Depth: d, PromptN: a.promptN, At: now}
 		if a.TG {
 			r.TG = a.tg
 		}
